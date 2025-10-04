@@ -58,7 +58,7 @@ jobs:
     name: Build Win64
     # "runs-on" - This job can only run on Runners that have all these tags. 
     # When setting up your runner it will need to have these tags, or you will need to modify the tags listed here so it can be used by this build.
-    runs-on: [self-hosted, build-win]
+    runs-on: [self-hosted]
     # "env" - Specify environment variables unique to this single job, this is critical later when we add multiple builds :)
     env:
       # What is the Unity BuildTarget value for this build? 
