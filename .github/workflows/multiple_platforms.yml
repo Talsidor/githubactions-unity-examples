@@ -1,0 +1,208 @@
+# A Unity Build and Steam Deploy workflow that builds for Windows, Mac and Linux!
+# This is an advanced workflow: To better understand how GitHub Actions works, make sure to check out simple.yml first.
+
+# Pipeline name
+name: Unity Build Pipeline (Multiple Platforms)
+
+# ============== #
+# GitHub Actions #
+# Events         # https://docs.github.com/en/actions/get-started/understand-github-actions#events
+# ============== #
+# What events should trigger this action? We've specified the 'push' event, which means this action will trigger on each Git Push
+on: [push]
+
+# ===================== #
+# Environment Variables #
+# ===================== #
+env:
+    # Generates an auto-incrementing build number (e.g. "1.23.1")
+    SEMVER: "1.${{ github.run_number }}.${{ github.run_attempt }}"
+
+    # URL pointing to this build run - useful to insert into notifications!
+    JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    # Where is the Unity editor install located on the build machine?
+    # (These path variables are double-quoted so the inner quotes are kept as part of the value, because the path is likely to contain spaces.)
+    # !! ACTION REQUIRED - Change this to YOUR install path!
+    EDITOR_PATH: '"C:/Program Files/Unity/Hub/Editor/6000.0.49f1/Editor/Unity.exe"'
+
+    # Where is the Steam SDK install located? Should end in '/steamworks_sdk/sdk'
+    # !! ACTION REQUIRED - Change this to YOUR install path!
+    STEAM_PATH: '"C:\steamworks_sdk\sdk"'
+
+    # This is what the build's folder and executable files will be named (e.g. game.exe / game.app / game.x86_64)
+    # !! ACTION REQUIRED - Change this to YOUR game name!
+    GAME_NAME: 'game'
+
+# ==== #
+# Jobs # https://docs.github.com/en/actions/get-started/understand-github-actions#jobs
+# ==== #
+jobs:
+
+  # ================ #
+  # BUILD WINDWS JOB #
+  # ================ #
+
+  build-win:
+    name: Build Win64
+    # This job can only run on Runners that have all these tags
+    runs-on: [self-hosted, build-win]
+    env:
+      # What is the Unity BuildTarget value for this build? 
+      # See: https://docs.unity3d.com/ScriptReference/BuildTarget.html
+      TARGET_PLATFORM: StandaloneWindows64
+
+    # Build steps
+    steps:
+
+      # ============ #
+      #   Checkout   #
+      # ============ #
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          clean: false
+      
+      # ========= #
+      #   Build   #
+      # ========= #
+      
+      - name: Build Win64
+        id: buildStep
+        run: |
+          & ${{ env.EDITOR_PATH }} -batchmode -projectPath "./" -timestamps -quit -buildWindows64Player "../build/${{ env.TARGET_PLATFORM }}/${{ env.GAME_NAME }}/${{ env.GAME_NAME }}.exe" -logFile - -executeMethod BuildScript.SetVersionNumberFromArg -buildVersion "${{ env.SEMVER }}" | Tee-Object -FilePath '../output.txt'
+
+      # ================= #
+      # Prepare for Steam #
+      # ================= #
+      
+      - name: Copy build to Steamworks upload directory
+        run: |
+          # Create a variable which points to the Steam SDK's Windows content path (the destination folder)
+          $dest = "${{ env.STEAM_PATH }}\tools\ContentBuilder\content\win\"
+
+          # Clear existing files in the destination folder
+          Remove-Item -Path "$dest*" -Recurse -Force
+
+          # Copy new build to the destination folder
+          cp "../build/${{ env.TARGET_PLATFORM }}/*" $dest -r
+
+          # Remove the _DoNotShip folder from the copied build, if it exists
+          Remove-Item -Path "$dest/${{ env.GAME_NAME }}_BurstDebugInformation_DoNotShip" -Recurse -Force
+
+  # ============= #
+  # BUILD MAC JOB #
+  # ============= #
+
+  build-mac:
+    name: Build Mac
+    runs-on: [self-hosted, build-mac]
+    env:
+      TARGET_PLATFORM: StandaloneOSX
+    steps:
+
+      # ============ #
+      #   Checkout   #
+      # ============ #
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          clean: false
+      
+      # ========= #
+      #   Build   #
+      # ========= #
+      
+      - name: Build Mac
+        id: buildStep
+        run: |
+          & ${{ env.EDITOR_PATH }} -batchmode -projectPath "./" -timestamps -quit -buildOSXUniversalPlayer "../build/${{ env.TARGET_PLATFORM }}/${{ env.GAME_NAME }}.app" -logFile - -executeMethod BuildScript.SetVersionNumberFromArg -buildVersion "${{ env.SEMVER }}" | Tee-Object -FilePath '../output.txt'
+      
+      # ================= #
+      # Prepare for Steam #
+      # ================= #
+      
+      - name: Copy build to Steamworks upload directory
+        run: |
+          $dest = "${{ env.STEAM_PATH }}\tools\ContentBuilder\content\mac\"
+
+          Remove-Item -Path "$dest*" -Recurse -Force
+
+          cd "../build/${{ env.TARGET_PLATFORM }}/"
+
+          cp "./*" $dest -r
+
+  # =============== #
+  # BUILD LINUX JOB #
+  # =============== #
+
+  build-linux:
+    name: Build Linux64
+    runs-on: [self-hosted, build-linux]
+    env:
+      TARGET_PLATFORM: StandaloneLinux64
+    steps:
+      
+      # ============ #
+      #   Checkout   #
+      # ============ #
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          clean: false
+      
+      # ========= #
+      #   Build   #
+      # ========= #
+      
+      - name: Build Linux 64
+        id: buildStep
+        run: |
+          & ${{ env.EDITOR_PATH }} -batchmode -projectPath "./" -timestamps -quit -buildLinux64Player "../build/${{ env.TARGET_PLATFORM }}/${{ env.GAME_NAME }}.x86_64" -logFile - -executeMethod BuildScript.SetVersionNumberFromArg -buildVersion "${{ env.SEMVER }}" | Tee-Object -FilePath '../output.txt'
+      
+      # ================= #
+      # Prepare for Steam #
+      # ================= #
+      
+      - name: Copy build to Steamworks upload directory
+        run: |
+          $dest = "${{ env.STEAM_PATH }}\tools\ContentBuilder\content\linux\"
+
+          Remove-Item -Path "$dest*" -Recurse -Force
+
+          cd "../build/${{ env.TARGET_PLATFORM }}/"
+
+          cp "./*" $dest -r
+
+          # Remove the _DoNotShip folder from the copied build, if it exists
+          Remove-Item -Path "$dest/${{ env.GAME_NAME }}_BurstDebugInformation_DoNotShip" -Recurse -Force
+
+  # =================== #
+  # DEPLOY ALL TO STEAM #
+  # =================== #
+
+  deploy:
+    name: Deploy all builds to Steam
+    runs-on: [self-hosted, lite]
+    # Wait for the 3 build jobs to finish before running this job
+    needs: [
+      build-win,
+      build-mac,
+      build-linux
+    ]
+    steps:
+
+      # =============== #
+      # Deploy to Steam #
+      # =============== #
+      
+      # When we invoke Steam Builder, we pass SEMVER as an argument, so Steam can associate each build with its version number
+      - name: Deploy via Steamworks SDK 
+        run: |
+          & ${{ env.STEAM_PATH }}\tools\ContentBuilder\upload_to_steam.bat ${{ env.SEMVER }} "..\scripts\all_app_build.vdf"

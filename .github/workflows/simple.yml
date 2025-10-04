@@ -1,0 +1,155 @@
+# The simplest Unity Build & Steam Deploy using GitHub Actions!
+#
+# This .yml file defines a GitHub Actions Workflow. By placing this file in your repo (inside <root folder>/.github/workflows/), you are instructing GitHub to execute this workflow for your repo when a specified event occurs.
+# To learn more about how GitHub Actions works, see the official doco here: 
+# https://docs.github.com/en/actions/get-started/understand-github-actions
+#
+# Once triggered, this workflow simply:
+# 1. Checks out your project files from Git
+# 2. Runs the Unity Editor to build your project for Windows
+# 3. Copies the Windows build to the Steam SDK upload directory
+# 4. Runs the Steam SDK to upload the Windows build to Steam
+# For more complex workflows, have a look at the other workflow files in this repository :) 
+
+# Pipeline name
+name: Unity Build Pipeline (Simple)
+
+# ============== #
+# GitHub Actions #
+# Events         # https://docs.github.com/en/actions/get-started/understand-github-actions#events
+# ============== #
+# What events should trigger this action? We've specified the 'push' event, which means this action will trigger on each Git Push
+on: [push]
+
+# ===================== #
+# GitHub Actions        #
+# Environment Variables # https://docs.github.com/en/actions/concepts/workflows-and-actions/variables
+# ===================== #
+env:
+    # Generates an auto-incrementing build number (e.g. "1.23.1")
+    SEMVER: "1.${{ github.run_number }}.${{ github.run_attempt }}"
+
+    # URL pointing to this build run - useful for inserting a link to the dashboard for this run into notifications!
+    JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    # Where is the Unity editor install located on the build machine? 
+    # (Note: These path variables are double-quoted (' and " on both sides) so the inner quotes are kept as part of the value, as the path is likely to contain spaces, which will cause issues if not wrapped in quotes.)
+    # !! ACTION REQUIRED -  Change this to YOUR install path!
+    EDITOR_PATH: '"C:/Program Files/Unity/Hub/Editor/6000.0.49f1/Editor/Unity.exe"'
+
+    # Where is the Steam SDK install located? Should end in '/steamworks_sdk/sdk'
+    # !! ACTION REQUIRED - Change this to YOUR install path!
+    STEAM_PATH: '"C:\steamworks_sdk\sdk"'
+
+    # This is what the build's folder and executable files will be named (e.g. game.exe / game.app / game.x86_64)
+    # !! ACTION REQUIRED - Change this to YOUR game name!
+    GAME_NAME: 'game'
+
+# ============== #
+# GitHub Actions #
+# Jobs           # https://docs.github.com/en/actions/get-started/understand-github-actions#jobs
+# ============== #
+jobs:
+
+  # ========= #
+  # BUILD JOB #
+  # ========= #
+  build-win:
+    name: Build Win64
+    # "runs-on" - This job can only run on Runners that have all these tags. 
+    # When setting up your runner it will need to have these tags, or you will need to modify the tags listed here so it can be used by this build.
+    runs-on: [self-hosted, build-win]
+    # "env" - Specify environment variables unique to this single job, this is critical later when we add multiple builds :)
+    env:
+      # What is the Unity BuildTarget value for this build? 
+      # See: https://docs.unity3d.com/ScriptReference/BuildTarget.html
+      TARGET_PLATFORM: StandaloneWindows64
+
+    # Build steps
+    steps:
+
+      # ================= #
+      # Step 1. Checkout  #
+      # ================= #
+      
+      # Simple first step, we use one of GitHub's included Actions commands, called 'checkout', to simply pull down our project files to this Runner's working directory
+      # See full doco on the checkout action here: https://github.com/actions/checkout
+      #
+      # We pass it just two arguments:
+      # lfs: true     | We want this checkout to include LFS files (If you're not already using LFS I strongly recommend it, read more on LFS here: https://git-lfs.com/)
+      # clean: false  | Do NOT wipe local changes before updating any new project changes. Turning clean OFF is critical to doing fast build automation with Unity, as we want to keep the imported changes, such as the /Library/ folder, or every time we do a build we'll have to import all our project assets from scratch!
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          clean: false
+      
+      # ============= #
+      # Step 2. Build #
+      # ============= #
+      
+      # Here we launch the Unity Editor from the command line, see this Unity doco page for more info:
+      # https://docs.unity3d.com/Manual/EditorCommandLineArguments.html
+      # (The & at the start of the line is telling Powershell we're asking it to run an executable)
+      # 
+      # We pass the following arguments to the Unity Editor:
+      # -batchmode        | This runs the Editor "headless" (no UI window), and skips any pop-ups requiring human interaction
+      # -projectPath "./" | Tells the Unity Editor where the Project we want to open is. By passing "./" we're telling it "in the current folder", as GitHub Actions automatically sets the current folder to our project root.
+      # -timestamps       | Prefixes every Editor.log message with the current timestamp and thread ID. Feel free to remove this argument if you don't want this
+      # -quit             | This auto-exits the Editor after the requested operations are complete
+      # -buildWindows64Player "../build/${{ env.TARGET_PLATFORM }}/${{ env.GAME_NAME }}/${{ env.GAME_NAME }}.exe"
+      # -logFile -        | Passing "-" to logFile tells Unity to print its output to the console, which allows GitHub Actions to capture and display it. Later on this line we then use Powershell's Tee-Object to also print the output to a file.
+      # -executeMethod BuildScript.SetVersionNumberFromArg  | This executes a method in a custom script I've put in the otherwise empty project to set Unity's build version number to this run's SEMVER, which we can then use to display the build # inside the build.
+      # -buildVersion "${{ env.SEMVER }}" | The arg that passes the SEMVER, for the above method to use
+      # 
+      # Finally, we add this part onto the end of our command: "| Tee-Object -FilePath '../output.txt'"
+      # Tee-Object is a Powershell command that means "also send the output from this command to a second location"
+      # In this case we specify "-FilePath" and give it the file we want to "tee" the output to: '../output.txt'.
+      # By doing this we get the Editor logs -both- in the GitHub Actions output, -and- in a log file!
+      - name: Build Win64
+        id: buildStep
+        run: |
+          & ${{ env.EDITOR_PATH }} -batchmode -projectPath "./" -timestamps -quit -buildWindows64Player "../build/${{ env.TARGET_PLATFORM }}/${{ env.GAME_NAME }}/${{ env.GAME_NAME }}.exe" -logFile - -executeMethod BuildScript.SetVersionNumberFromArg -buildVersion "${{ env.SEMVER }}" | Tee-Object -FilePath '../output.txt'
+
+      # ================================================ #
+      # Step 3. Copy build to Steam SDK upload directory #
+      # ================================================ #
+      
+      # Here we use a few Powershell commands to copy our freshly made build into the Steamworks SDK's content directory.
+      # See the in-line comments before each command below for a description of what each one does.
+      - name: Copy build to Steamworks upload directory
+        run: |
+          # Create a variable which points to the Steam SDK's Windows content path (the destination folder)
+          $dest = "${{ env.STEAM_PATH }}\tools\ContentBuilder\content\win\"
+
+          # Clear existing files in the destination folder
+          Remove-Item -Path "$dest*" -Recurse -Force
+
+          # Copy new build to the destination folder
+          cp "../build/${{ env.TARGET_PLATFORM }}/outpost/*" $dest -r
+
+          # Remove the _DoNotShip folder from the copied build, if it exists
+          Remove-Item -Path "$dest/${{ env.GAME_NAME }}_BurstDebugInformation_DoNotShip" -Recurse -Force
+
+      # ======================= #
+      # Step 4. Deploy to Steam #
+      # ======================= #
+      
+      # Here we launch the Steamworks SDK ContentBuilder from the command line.
+      # !! ACTION REQUIRED - The specifics of your Steam upload are going to depend on your game. You will need to configure your Steamworks install, including with the app and depot IDs of your game, and give it access to a Steam account that has permission to upload builds for your game. You will also need to modify the below command the same way you need to modify any command to upload your game to Steam. (If you haven't done a successful manual upload of your game to Steam yet, do that first. It will tell you what works best for your game)
+      # You can find the full documentation for using the Steamworks SDK to upload builds here: 
+      # https://partner.steamgames.com/doc/sdk/uploading
+      #
+      # In the below example command, we pass the following arguments to the Steam content builder:
+      # +login YourSteamAccountName         | Tells Steamworks to use this Steam account for the upload. Replace this with your account name. You can follow the Steamworks doco to pre-configure your SDK install with an account token, so it won't ask you for a password here.
+      # +run_app_build                      | Tells the SDK we're launching it to upload builds. The next two are sub-arguments:
+        # -desc ${{ env.SEMVER }}           | Passes the value of SEMVER as the description of this build, overriding the static value written in the build script. This means our build number will be displayed in the Steamworks Builds dashboard, making it easy to tell which upload is which build.
+        # "..\scripts\simple_app_build.vdf" | Specify which build script we want this run to use. The Steamworks SDK comes with a few example scripts, including this one ("simple_app_build.vdf"), but you will need to modify it or create your own, follow the Steamworks SDK doco on how to do this.
+      # +quit                               | Like Unity above, we pass +quit to tell the SDK to auto-close itself once done.
+      # 
+      - name: Deploy via Steamworks SDK 
+        run: |
+          & ${{ env.STEAM_PATH }}\tools\ContentBuilder\builder\steamcmd.exe +login YourSteamAccountName +run_app_build -desc ${{ env.SEMVER }} "..\scripts\simple_app_build.vdf" +quit
+
+# And we're all done!
+# For more complex workflows, have a look at the other workflow files in this repository :) 
