@@ -33,13 +33,13 @@ env:
     JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     # Where is the Unity editor install located on the build machine? 
-    # (Note: These path variables are double-quoted (' and " on both sides) so the inner quotes are kept as part of the value, as the path is likely to contain spaces, which will cause issues if not wrapped in quotes.)
+    # (Note: This path variable is double-quoted (' and " on both sides) so the inner quotes are kept as part of the value, as the path is likely to contain spaces, which will cause issues if not wrapped in quotes.)
     # !! ACTION REQUIRED -  Change this to YOUR install path!
     EDITOR_PATH: '"C:/Program Files/Unity/Hub/Editor/6000.0.49f1/Editor/Unity.exe"'
 
     # Where is the Steam SDK install located? Should end in '/steamworks_sdk/sdk'
     # !! ACTION REQUIRED - Change this to YOUR install path!
-    STEAM_PATH: '"C:\steamworks_sdk\sdk"'
+    STEAM_PATH: 'C:\steamworks_sdk\sdk'
 
     # This is what the build's folder and executable files will be named (e.g. game.exe / game.app / game.x86_64)
     # !! ACTION REQUIRED - Change this to YOUR game name!
@@ -149,7 +149,7 @@ jobs:
       # 
       - name: Deploy via Steamworks SDK 
         run: |
-          & ${{ env.STEAM_PATH }}\tools\ContentBuilder\builder\steamcmd.exe +login YourSteamAccountName +run_app_build -desc ${{ env.SEMVER }} "..\scripts\simple_app_build.vdf" +quit
+          & "${{ env.STEAM_PATH }}\tools\ContentBuilder\builder\steamcmd.exe" +login YourSteamAccountName +run_app_build -desc ${{ env.SEMVER }} "..\scripts\simple_app_build.vdf" +quit
 
 # And we're all done!
 # For more complex workflows, have a look at the other workflow files in this repository :) 
